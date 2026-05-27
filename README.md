@@ -1,27 +1,51 @@
-# Circuit Builder
+# 🔌 Circuit Builder
 
-Full-stack circuit agent app with a FastAPI backend, React/Vite frontend, self-hosted animated circuit viewer, Wokwi Elements breadboard view, and electrical verification.
+A full-stack AI-powered circuit design agent that takes natural language prompts and generates, verifies, and visualizes electronic circuits. The application features a FastAPI backend orchestrating an Anthropic-powered LangGraph agent, and a React/Vite frontend providing interactive breadboard and schematic visualizations. 🤖✨
 
-## Run
+## ✨ Features
 
-```bash
-cp .env.example .env
-docker compose up --build
-```
+- 🧠 **AI Circuit Generation**: Uses Claude (via Anthropic) to interpret user intents and generate complete circuit topologies.
+- ⚡ **Circuit Verification**: Validates generated circuits using PySpice/Ngspice for operating-point simulation, verifying current flows, LED brightness, and component safety (e.g., missing current-limiting resistors).
+- 🎨 **Interactive Visualizations**:
+  - 🍞 Wokwi Elements for realistic breadboard views with interactive component states (e.g., dynamic LED brightness, buzzer activation).
+  - 📊 CircuitJS integration for animated schematic simulation.
+- 🚀 **Real-time Streaming**: WebSocket-based progress updates during the multi-step circuit generation process.
 
-Open `http://localhost:3000`.
+## 🏗️ Architecture
 
-The backend works without an Anthropic key by using deterministic safe generation for the included example circuits. Set `ANTHROPIC_API_KEY` to enable Claude-assisted intent parsing.
+- 🐍 **Backend**: Python, FastAPI, LangGraph, LangChain, PySpice/Ngspice.
+- ⚛️ **Frontend**: React, Vite, Zustand, TailwindCSS, Wokwi Elements.
 
-## API
+## 🚀 Getting Started
 
-- `POST /api/circuit/generate` with `{ "prompt": "Christmas tree with 5 LEDs" }`
-- `GET /api/circuit/examples`
-- `POST /api/circuit/verify` with `{ "spice_netlist": "..." }`
-- `WS /ws/agent-stream`
+### 📋 Prerequisites
+- 🐳 Docker and Docker Compose
+- 🔑 Anthropic API Key (Optional for included examples, required for novel circuit generation)
 
-## Notes
+### 🏃‍♂️ Running the Application
 
-- LED circuits always receive current-limiting resistors before simulation.
-- PySpice/Ngspice is attempted first for operating-point simulation. If unavailable or unable to parse a netlist, the backend returns a graceful deterministic verification report with raw error context.
-- `frontend/public/circuitjs/index.html` is self-hosted and accepts CircuitJS-style text through `postMessage({ type: "loadCircuit", circuit })`.
+1. Copy the example environment file:
+   ```bash
+   cp .env.example .env
+   ```
+2. (Optional) Add your `ANTHROPIC_API_KEY` to the `.env` file to enable custom AI generation.
+3. Start the services using Docker Compose:
+   ```bash
+   docker compose up --build
+   ```
+4. Access the web interface at `http://localhost:3000` 🌐.
+
+## 📝 Notes
+
+- 💡 LED circuits always receive current-limiting resistors before simulation.
+- 🛠️ PySpice/Ngspice is attempted first for operating-point simulation. If unavailable or unable to parse a netlist, the backend returns a graceful deterministic verification report with raw error context.
+- 📂 `frontend/public/circuitjs/index.html` is self-hosted and accepts CircuitJS-style text through `postMessage({ type: "loadCircuit", circuit })`.
+
+## 📁 Project Structure
+
+- ⚙️ `/backend` - FastAPI application and LangGraph AI agent. See [Backend README](backend/README.md).
+- 💻 `/frontend` - React/Vite web interface. See [Frontend README](frontend/README.md).
+
+## 📄 License
+
+This project is licensed under the [MIT License](LICENSE). ⚖️

@@ -1,6 +1,7 @@
 [project]
 name = "backend"
 version = "0.1.0"
+license = { text = "MIT" }
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
