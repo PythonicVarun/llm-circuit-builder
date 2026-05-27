@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Self-hosted CircuitJS1 View</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #090d14;
+        color: #e5eefb;
+        font-family: Inter, system-ui, sans-serif;
+      }
+
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+
+      .badge {
+        position: fixed;
+        left: 14px;
+        bottom: 12px;
+        padding: 6px 9px;
+        border: 1px solid #253041;
+        border-radius: 8px;
+        background: rgba(15, 17, 23, 0.84);
+        color: #94a3b8;
+        font-size: 12px;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="canvas"></canvas>
+    <div class="badge">Self-hosted CircuitJS text viewer</div>
+
+    <script>
+      const canvas = document.getElementById('canvas');
+      const ctx = canvas.getContext('2d');
+      let elements = [];
+      let switches = new Map();
+      let animation = 0;
+
+      const colors = {
+        wire: '#7f8da3',
+        cyan: '#00d4ff',
+        red: '#ff4a4a',
+        yellow: '#ffd166',
+        green: '#26e36a',
+        body: '#141c2a',
+        text: '#e5eefb',
+      };
+
+      function resize() {
+        canvas.width = canvas.clientWidth * window.devicePixelRatio;
+        canvas.height = canvas.clientHeight * window.devicePixelRatio;
+        ctx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
+      }
+
+      function parseCircuit(text) {
+        const next = [];
+        text
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .forEach((line) => {
+            if (line.startsWith('$')) return;
+            const parts = line.split(/\s+/);
+            const type = parts[0];
+            const x1 = Number(parts[1]);
+            const y1 = Number(parts[2]);
+            const x2 = Number(parts[3]);
+            const y2 = Number(parts[4]);
+            if (!Number.isFinite(x1 + y1 + x2 + y2)) return;
+            const element = { type, x1, y1, x2, y2, raw: parts };
+            if (type === 'r') element.value = parts[6] || '330';
+            if (type === 'v') element.value = parts[7] || '9';
+            if (type === 'd') element.color = parts[7] || 'red';
+            if (type === 'c') element.value = parts[6] || '10u';
+            if (type === 'ic') element.label = parts[5] || 'IC';
+            if (type === 't') element.flip = parts[6] === '-1';
+            if (type === 's') {
+              const key = `${x1},${y1},${x2},${y2}`;
+              if (!switches.has(key)) switches.set(key, true);
+              element.key = key;
+            }
+            next.push(element);
+          });
+        elements = next;
+      }
+
+      function drawLine(x1, y1, x2, y2, stroke = colors.wire, width = 4) {
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = width;
+        ctx.lineCap = 'round';
+        ctx.stroke();
+      }
+
+      function midpoint(element) {
+        return [(element.x1 + element.x2) / 2, (element.y1 + element.y2) / 2];
+      }
+
+      function drawResistor(element) {
+        drawLine(element.x1, element.y1, element.x2, element.y2);
+        const [mx, my] = midpoint(element);
+        ctx.fillStyle = colors.body;
+        ctx.strokeStyle = '#ffd166';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(mx - 31, my - 15, 62, 30, 5);
+        ctx.fill();
+        ctx.stroke();
+        label(`${element.value}Ω`, mx, my + 4, '#ffd166');
+      }
+
+      const ledHex = {
+        red: '#ff4a4a',
+        yellow: '#ffd166',
+        green: '#26e36a',
+        blue: '#49a7ff',
+        white: '#f7fbff',
+      };
+
+      function drawDiode(element, index) {
+        drawLine(element.x1, element.y1, element.x2, element.y2);
+        const [mx, my] = midpoint(element);
+        const hue = ledHex[(element.color || 'red').toLowerCase()] || colors.red;
+        ctx.save();
+        ctx.shadowColor = hue;
+        ctx.shadowBlur = 18 + 12 * Math.sin(animation / 35 + index);
+        ctx.fillStyle = hue;
+        ctx.globalAlpha = 0.88;
+        ctx.beginPath();
+        ctx.arc(mx, my, 16, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        label('LED', mx, my + 34, colors.text);
+      }
+
+      function drawTransistor(element) {
+        const [mx, my] = midpoint(element);
+        ctx.fillStyle = '#1a2433';
+        ctx.strokeStyle = '#8ff7b3';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(mx, my, 18, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        // base lead to the side
+        drawLine(element.x1, element.y1, mx - 14, my, '#8ff7b3', 3);
+        // collector lead up, emitter lead down
+        drawLine(mx + 9, my - 14, element.x2, element.y2 - 30, '#8ff7b3', 3);
+        drawLine(mx + 9, my + 14, element.x2, element.y2 + 30, '#8ff7b3', 3);
+        label('Q', mx, my + 4, '#8ff7b3');
+        label('NPN', mx, my + 32, colors.text);
+      }
+
+      function drawIC(element) {
+        const x = Math.min(element.x1, element.x2);
+        const y = Math.min(element.y1, element.y2);
+        const w = Math.abs(element.x2 - element.x1);
+        const h = Math.abs(element.y2 - element.y1);
+        ctx.fillStyle = '#0d141f';
+        ctx.strokeStyle = '#c084fc';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, h, 6);
+        ctx.fill();
+        ctx.stroke();
+        // notch
+        ctx.beginPath();
+        ctx.arc(x + w / 2, y, 6, 0, Math.PI);
+        ctx.fillStyle = '#1a2433';
+        ctx.fill();
+        // pins
+        ctx.fillStyle = '#7f8da3';
+        const pinPairs = 4;
+        for (let i = 0; i < pinPairs; i += 1) {
+          const py = y + 12 + (i * (h - 24)) / (pinPairs - 1);
+          ctx.fillRect(x - 8, py - 2, 8, 4);
+          ctx.fillRect(x + w, py - 2, 8, 4);
+        }
+        label(element.label || 'IC', x + w / 2, y + h / 2 + 4, '#c084fc');
+        label('555 Timer', x + w / 2, y + h + 18, colors.text);
+      }
+
+      function drawVoltage(element) {
+        drawLine(element.x1, element.y1, element.x2, element.y2, '#00d4ff', 5);
+        const [mx, my] = midpoint(element);
+        ctx.fillStyle = '#0b2632';
+        ctx.strokeStyle = colors.cyan;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(mx, my, 25, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        label(`${element.value}V`, mx, my + 4, colors.cyan);
+      }
+
+      function drawSwitch(element) {
+        const closed = switches.get(element.key);
+        drawLine(element.x1, element.y1, element.x2, element.y2, closed ? colors.green : colors.red);
+        const [mx, my] = midpoint(element);
+        ctx.fillStyle = closed ? colors.green : colors.red;
+        ctx.beginPath();
+        ctx.arc(mx, my, 7, 0, Math.PI * 2);
+        ctx.fill();
+        label(closed ? 'ON' : 'OFF', mx, my - 18, closed ? colors.green : colors.red);
+      }
+
+      function drawCapacitor(element) {
+        drawLine(element.x1, element.y1, element.x2, element.y2);
+        const [mx, my] = midpoint(element);
+        drawLine(mx - 8, my - 18, mx - 8, my + 18, '#c084fc', 3);
+        drawLine(mx + 8, my - 18, mx + 8, my + 18, '#c084fc', 3);
+        label('10µF', mx, my + 36, '#c084fc');
+      }
+
+      function label(text, x, y, color) {
+        ctx.fillStyle = color;
+        ctx.font = '700 12px Inter, system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(text, x, y);
+      }
+
+      function drawDots() {
+        const blocked = [...switches.values()].some((closed) => !closed);
+        if (blocked) return;
+        elements
+          .filter((element) => ['w', 'r', 'd', 's'].includes(element.type))
+          .forEach((element, index) => {
+            const dx = element.x2 - element.x1;
+            const dy = element.y2 - element.y1;
+            const length = Math.hypot(dx, dy) || 1;
+            for (let offset = 0; offset < length; offset += 42) {
+              const phase = ((animation * 1.4 + offset + index * 9) % length) / length;
+              const x = element.x1 + dx * phase;
+              const y = element.y1 + dy * phase;
+              ctx.fillStyle = index % 2 ? '#00d4ff' : '#8ff7b3';
+              ctx.beginPath();
+              ctx.arc(x, y, 3.2, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          });
+      }
+
+      function drawGrid() {
+        ctx.fillStyle = '#090d14';
+        ctx.fillRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+        ctx.strokeStyle = '#101722';
+        ctx.lineWidth = 1;
+        for (let x = 0; x < canvas.clientWidth; x += 32) {
+          drawLine(x, 0, x, canvas.clientHeight, '#101722', 1);
+        }
+        for (let y = 0; y < canvas.clientHeight; y += 32) {
+          drawLine(0, y, canvas.clientWidth, y, '#101722', 1);
+        }
+      }
+
+      function frame() {
+        animation += 1;
+        drawGrid();
+        const xOffset = Math.max(0, (canvas.clientWidth - 780) / 2);
+        const yOffset = Math.max(20, (canvas.clientHeight - 460) / 2);
+        ctx.save();
+        ctx.translate(xOffset, yOffset);
+        elements.forEach((element, index) => {
+          if (element.type === 'w') drawLine(element.x1, element.y1, element.x2, element.y2);
+          if (element.type === 'r') drawResistor(element);
+          if (element.type === 'd') drawDiode(element, index);
+          if (element.type === 'v') drawVoltage(element);
+          if (element.type === 's') drawSwitch(element);
+          if (element.type === 'c') drawCapacitor(element);
+          if (element.type === 't') drawTransistor(element);
+          if (element.type === 'ic') drawIC(element);
+          if (element.type === 'l') drawLine(element.x1, element.y1, element.x2, element.y2, '#c084fc');
+        });
+        drawDots();
+        ctx.restore();
+        requestAnimationFrame(frame);
+      }
+
+      window.addEventListener('message', (event) => {
+        if (event.data?.type === 'loadCircuit') {
+          parseCircuit(event.data.circuit || '');
+        }
+      });
+
+      canvas.addEventListener('click', (event) => {
+        const rect = canvas.getBoundingClientRect();
+        const xOffset = Math.max(0, (canvas.clientWidth - 780) / 2);
+        const yOffset = Math.max(20, (canvas.clientHeight - 460) / 2);
+        const x = event.clientX - rect.left - xOffset;
+        const y = event.clientY - rect.top - yOffset;
+        for (const element of elements.filter((item) => item.type === 's')) {
+          const [mx, my] = midpoint(element);
+          if (Math.hypot(x - mx, y - my) < 34) {
+            switches.set(element.key, !switches.get(element.key));
+          }
+        }
+      });
+
+      window.addEventListener('resize', resize);
+      resize();
+//       parseCircuit(`$ 1 0.000005 10.2 50 5 43 5e-11
+// v 80 330 80 70 0 0 40 9 0 0 0.5
+// w 80 70 140 70 0
+// r 140 140 280 140 0 360
+// d 280 140 360 140 1 0.805904783
+// w 360 140 420 140 0
+// w 420 140 420 330 0
+// w 420 330 80 330 0`);
+      requestAnimationFrame(frame);
+    </script>
+  </body>
+</html>

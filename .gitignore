@@ -1,0 +1,14 @@
+.env
+.venv/
+backend/.venv/
+__pycache__/
+*.py[cod]
+
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/playwright-mcp-output/
+frontend/circuit-builder-breadboard.png
+
+backend/.pytest_cache/
+backend/.mypy_cache/
