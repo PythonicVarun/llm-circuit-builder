@@ -39,7 +39,14 @@
         <section class="panel chat-panel">
             <div class="panel-header">
                 <h2>Describe a circuit</h2>
-                <button id="new-chat" class="ghost-btn small" title="Reset conversation">clear</button>
+                <div class="session-bar">
+                    <div class="session-combo">
+                        <input id="session-input" class="session-input" type="text" placeholder="Search sessions&hellip;" autocomplete="off" spellcheck="false" />
+                        <div id="session-list" class="session-list hidden" role="listbox"></div>
+                    </div>
+                    <button id="session-new" class="ghost-btn small" title="New session">+</button>
+                    <button id="session-delete" class="ghost-btn small" title="Delete this session">&times;</button>
+                </div>
             </div>
 
             <div id="messages" class="messages">

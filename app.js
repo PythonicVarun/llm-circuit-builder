@@ -10,7 +10,10 @@ const messagesEl = $('#messages');
 const promptEl = $('#prompt');
 const composerEl = $('#composer');
 const sendBtn = $('#send-btn');
-const newChatBtn = $('#new-chat');
+const sessionInput = $('#session-input');
+const sessionList = $('#session-list');
+const sessionNewBtn = $('#session-new');
+const sessionDeleteBtn = $('#session-delete');
 const llmStatusEl = $('#llm-status');
 const simStatusEl = $('#sim-status');
 const serialOutEl = $('#serial-out');
@@ -45,14 +48,200 @@ let activeFilePath = null;
 
 // state
 const STORAGE_KEY = 'circuit-lab.llm-config';
+const SESSIONS_KEY = 'circuit-lab.sessions';        // { sessions: [...], activeId }
+const LEGACY_SESSION_KEY = 'circuit-lab.session';   // single-session predecessor
 let llmCfg = loadCfg();
 let llm = llmCfg ? new LLMClient(llmCfg) : null;
 
 let wokwi = null;
 let wokwiReady = false;
-let conversation = []; // [{role,content}] sent to LLM
-let currentProject = null; // last generated {files, start}
 let isStreaming = false;
+
+// Live mirror of the active session — DOM code reads/writes these directly,
+// and saveSession() flushes them back into the session record.
+let conversation = []; // [{role,content}] sent to LLM
+let currentProject = null;
+
+// Multi-session store. Each session = { id, title, createdAt, updatedAt,
+// conversation, currentProject }. We keep them all in localStorage under one
+// key plus an activeId pointer.
+let sessions = [];   // newest first
+let activeId = null;
+
+function newSessionObj() {
+    return {
+        id: 's_' + Math.random().toString(36).slice(2, 10),
+        title: 'untitled',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        conversation: [],
+        currentProject: null,
+    };
+}
+
+function activeSession() {
+    return sessions.find(s => s.id === activeId) || null;
+}
+
+function deriveTitle(text) {
+    const t = String(text || '').replace(/\s+/g, ' ').trim();
+    return t.length > 38 ? t.slice(0, 38) + '…' : (t || 'untitled');
+}
+
+function persistSessions() {
+    const payload = { sessions, activeId };
+    try {
+        localStorage.setItem(SESSIONS_KEY, JSON.stringify(payload));
+    } catch (e) {
+        // quota — drop compiled hex from all sessions and retry.
+        const slim = {
+            activeId,
+            sessions: sessions.map(s => {
+                if (!s.currentProject?.files?.['sketch.hex']) return s;
+                const cp = { ...s.currentProject, files: { ...s.currentProject.files } };
+                delete cp.files['sketch.hex'];
+                return { ...s, currentProject: cp };
+            }),
+        };
+        try { localStorage.setItem(SESSIONS_KEY, JSON.stringify(slim)); } catch { }
+    }
+}
+
+function loadSessions() {
+    try {
+        const raw = localStorage.getItem(SESSIONS_KEY);
+        if (raw) {
+            const obj = JSON.parse(raw);
+            if (obj && Array.isArray(obj.sessions) && obj.sessions.length) {
+                sessions = obj.sessions;
+                activeId = obj.activeId && sessions.find(s => s.id === obj.activeId)
+                    ? obj.activeId : sessions[0].id;
+                return;
+            }
+        }
+        // Migrate legacy single-session blob if present.
+        const legacy = localStorage.getItem(LEGACY_SESSION_KEY);
+        if (legacy) {
+            const parsed = JSON.parse(legacy);
+            const s = newSessionObj();
+            s.conversation = Array.isArray(parsed.conversation) ? parsed.conversation : [];
+            s.currentProject = parsed.currentProject || null;
+            const firstUser = s.conversation.find(m => m.role === 'user');
+            if (firstUser) s.title = deriveTitle(firstUser.content);
+            sessions = [s];
+            activeId = s.id;
+            localStorage.removeItem(LEGACY_SESSION_KEY);
+            persistSessions();
+            return;
+        }
+    } catch { }
+    // Fresh start.
+    const s = newSessionObj();
+    sessions = [s];
+    activeId = s.id;
+}
+
+function saveSession() {
+    const s = activeSession();
+    if (s) {
+        s.conversation = conversation;
+        s.currentProject = currentProject;
+        // First user message becomes the title.
+        if ((s.title === 'untitled' || !s.title) && conversation.length) {
+            const firstUser = conversation.find(m => m.role === 'user');
+            if (firstUser) s.title = deriveTitle(firstUser.content);
+        }
+        s.updatedAt = Date.now();
+    }
+    persistSessions();
+    renderSessionPicker();
+}
+
+// Searchable combobox state. The input doubles as filter + display: when the
+// dropdown is closed it shows the active session's title; when open, whatever
+// the user is typing.
+let sessionQuery = '';
+let sessionListOpen = false;
+let sessionFocusIdx = -1;
+
+function renderSessionPicker() {
+    sessions.sort((a, b) => b.updatedAt - a.updatedAt);
+    sessionDeleteBtn.disabled = sessions.length <= 1;
+    if (!sessionListOpen) {
+        const cur = activeSession();
+        sessionInput.value = cur?.title || '';
+    }
+    renderSessionList();
+}
+
+function fmtRelative(ts) {
+    const d = (Date.now() - ts) / 1000;
+    if (d < 60) return 'just now';
+    if (d < 3600) return `${Math.floor(d / 60)}m`;
+    if (d < 86400) return `${Math.floor(d / 3600)}h`;
+    return `${Math.floor(d / 86400)}d`;
+}
+
+function filteredSessions() {
+    const q = sessionQuery.trim().toLowerCase();
+    if (!q) return sessions;
+    return sessions.filter(s => {
+        if ((s.title || '').toLowerCase().includes(q)) return true;
+        // also match content of conversation
+        return s.conversation.some(m => String(m.content || '').toLowerCase().includes(q));
+    });
+}
+
+function renderSessionList() {
+    sessionList.innerHTML = '';
+    const list = filteredSessions();
+    if (!list.length) {
+        const div = document.createElement('div');
+        div.className = 'session-empty';
+        div.textContent = 'No matching sessions';
+        sessionList.appendChild(div);
+        return;
+    }
+    list.forEach((s, i) => {
+        const row = document.createElement('div');
+        row.className = 'session-item' + (s.id === activeId ? ' active' : '') + (i === sessionFocusIdx ? ' focused' : '');
+        row.setAttribute('role', 'option');
+        row.dataset.id = s.id;
+        const title = document.createElement('span');
+        title.textContent = s.title || 'untitled';
+        const meta = document.createElement('span');
+        meta.className = 'session-meta';
+        meta.textContent = fmtRelative(s.updatedAt);
+        row.appendChild(title);
+        row.appendChild(meta);
+        row.addEventListener('mousedown', (e) => {
+            // mousedown (not click) so the input blur doesn't close the list first
+            e.preventDefault();
+            pickSession(s.id);
+        });
+        sessionList.appendChild(row);
+    });
+}
+
+function openSessionList() {
+    sessionListOpen = true;
+    sessionFocusIdx = -1;
+    sessionList.classList.remove('hidden');
+    renderSessionList();
+}
+function closeSessionList() {
+    sessionListOpen = false;
+    sessionQuery = '';
+    sessionList.classList.add('hidden');
+    // restore the visible title
+    const cur = activeSession();
+    sessionInput.value = cur?.title || '';
+}
+
+function pickSession(id) {
+    closeSessionList();
+    if (id !== activeId) switchSession(id);
+}
 
 // LLM config persistence
 function loadCfg() {
@@ -431,10 +620,91 @@ messagesEl.addEventListener('click', (e) => {
     }
 });
 
-newChatBtn.addEventListener('click', () => {
-    conversation = [];
-    messagesEl.querySelectorAll('.msg:not(.msg-system)').forEach(n => n.remove());
+// Multi-session controls — searchable combobox
+sessionInput.addEventListener('focus', () => {
+    sessionInput.value = '';
+    sessionQuery = '';
+    openSessionList();
 });
+sessionInput.addEventListener('input', () => {
+    sessionQuery = sessionInput.value;
+    sessionFocusIdx = -1;
+    if (!sessionListOpen) openSessionList();
+    else renderSessionList();
+});
+sessionInput.addEventListener('blur', () => {
+    // small delay so a click on an item can fire first
+    setTimeout(() => { if (sessionListOpen) closeSessionList(); }, 120);
+});
+sessionInput.addEventListener('keydown', (e) => {
+    const list = filteredSessions();
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (!sessionListOpen) openSessionList();
+        sessionFocusIdx = Math.min(list.length - 1, sessionFocusIdx + 1);
+        renderSessionList();
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        sessionFocusIdx = Math.max(0, sessionFocusIdx - 1);
+        renderSessionList();
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        const pick = list[sessionFocusIdx >= 0 ? sessionFocusIdx : 0];
+        if (pick) pickSession(pick.id);
+    } else if (e.key === 'Escape') {
+        e.preventDefault();
+        sessionInput.blur();
+    }
+});
+sessionNewBtn.addEventListener('click', () => {
+    const s = newSessionObj();
+    sessions.unshift(s);
+    activeId = s.id;
+    persistSessions();
+    loadActive();
+});
+sessionDeleteBtn.addEventListener('click', () => {
+    if (sessions.length <= 1) return;
+    const cur = activeSession();
+    if (!cur) return;
+    const ok = !cur.conversation.length || confirm(`Delete session "${cur.title}"?`);
+    if (!ok) return;
+    sessions = sessions.filter(s => s.id !== activeId);
+    activeId = sessions[0].id;
+    persistSessions();
+    loadActive();
+});
+
+function switchSession(id) {
+    if (!sessions.find(s => s.id === id)) return;
+    activeId = id;
+    persistSessions();
+    loadActive();
+}
+
+// Pull the active session's data into the live vars + rerender the chat UI.
+function loadActive() {
+    const s = activeSession();
+    conversation = s ? [...s.conversation] : [];
+    currentProject = s ? s.currentProject : null;
+    activeFilePath = null;
+
+    messagesEl.querySelectorAll('.msg:not(.msg-system)').forEach(n => n.remove());
+    for (const m of conversation) {
+        if (m.role === 'user') {
+            addMessage('user', m.content);
+        } else if (m.role === 'assistant') {
+            const clean = String(m.content).replace(/```wokwi-project[\s\S]*?```/i, '').trim();
+            const el = addMessage('assistant', clean || 'Project generated.');
+            const proj = extractProject(m.content);
+            if (proj) addProjectSummary(el, proj);
+        }
+    }
+    updateFilesBtnLabel();
+    [btnStart, btnPause, btnStop, btnRestart, btnFiles].forEach(b => b.disabled = !currentProject);
+    renderSessionPicker();
+    if (currentProject && wokwiReady) runProject(currentProject);
+}
 
 async function send() {
     if (isStreaming) return;
@@ -445,6 +715,7 @@ async function send() {
     promptEl.value = '';
     addMessage('user', text);
     conversation.push({ role: 'user', content: text });
+    saveSession();
 
     const asstEl = addMessage('assistant', '');
     asstEl.classList.add('cursor');
@@ -476,11 +747,14 @@ async function send() {
     const project = extractProject(full);
     if (!project) {
         addError('LLM did not return a valid wokwi-project block. Ask it to retry or refine the prompt.');
+        saveSession();
     } else {
         currentProject = project;
         updateFilesBtnLabel();
         addProjectSummary(asstEl, project);
+        saveSession();
         await runProject(project);
+        saveSession(); // pick up sketch.hex / start changes from AVR compile
     }
 
     isStreaming = false;
@@ -500,6 +774,8 @@ window.loadProject = async (project) => {
 // Boot
 updateLLMStatus();
 setSimStatus('idle');
+loadSessions();
+loadActive();
 if (!llmCfg) {
     // gentle nudge on first load
     setTimeout(openSettings, 250);

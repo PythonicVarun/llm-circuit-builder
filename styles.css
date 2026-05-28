@@ -814,3 +814,92 @@ body {
     .files-tree { max-height: 200px; }
     .files-view { height: 40vh; }
 }
+/* multi-session picker in chat panel header */
+.session-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.session-select {
+    background: var(--bg-soft);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    max-width: 180px;
+}
+.session-select:focus {
+    outline: 1px solid var(--phos);
+    border-color: var(--phos);
+}
+
+/* searchable session combobox */
+.session-combo {
+    position: relative;
+}
+.session-input {
+    background: var(--bg-soft);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    width: 180px;
+}
+.session-input:focus {
+    outline: 1px solid var(--phos);
+    border-color: var(--phos);
+}
+.session-list {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    min-width: 220px;
+    max-height: 240px;
+    overflow-y: auto;
+    background: var(--bg-elev);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    box-shadow: var(--shadow);
+    z-index: 30;
+}
+.session-list.hidden {
+    display: none;
+}
+.session-item {
+    padding: 5px 8px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text);
+    cursor: pointer;
+    border-bottom: 1px solid var(--line-soft);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.session-item:last-child {
+    border-bottom: none;
+}
+.session-item.active {
+    color: var(--phos);
+}
+.session-item.focused,
+.session-item:hover {
+    background: var(--phos-soft);
+}
+.session-item .session-meta {
+    color: var(--text-mute);
+    font-size: 10px;
+    margin-left: 6px;
+}
+.session-empty {
+    padding: 8px;
+    color: var(--text-mute);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-style: italic;
+}
