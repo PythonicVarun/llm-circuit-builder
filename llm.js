@@ -50,9 +50,11 @@ COMMON PARTS:
 - "wokwi-slide-switch", "wokwi-dip-switch-8"
 
 DEFAULTS for sim:start params:
-- Arduino sketches: { "firmware": "sketch.ino", "elf": "sketch.ino" }  (Wokwi compiles in-browser)
-- MicroPython:      { "firmware": "main.py",    "elf": "main.py" }
-- Pi Pico (Arduino-pico): { "firmware": "sketch.ino", "elf": "sketch.ino" }
+- AVR Arduino (UNO/Mega/Nano/ATtiny): { "firmware": "sketch.ino", "elf": "sketch.ino" }
+  (the host page auto-compiles .ino to .hex via hexi.wokwi.com before starting)
+- ESP32 Arduino:    { "firmware": "sketch.ino", "elf": "sketch.ino" }  (compiled in-browser)
+- Pi Pico Arduino:  { "firmware": "sketch.ino", "elf": "sketch.ino" }  (compiled in-browser)
+- MicroPython:      { "firmware": "main.py",    "elf": "main.py" }     (no compile needed)
 
 RULES
 - Always include current-limiting resistors with LEDs (typ. 220-330 ohm).

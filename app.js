@@ -2,6 +2,7 @@ import { MessagePortTransport } from './message-port-transport.js';
 import { WokwiClient } from './wokwi-client.js';
 import { LLMClient, extractProject } from './llm.js';
 import { buildZip, buildTree, downloadBlob } from './zip.js';
+import { detectAvrBoard, buildArduinoHex } from './build.js';
 
 // DOM elements
 const $ = (s) => document.querySelector(s);
@@ -336,16 +337,40 @@ async function runProject(project) {
         setSimStatus('waiting for iframe…', 'warn');
         return;
     }
-    setSimStatus('uploading…', 'warn');
     serialOutEl.textContent = '';
 
-    try { await wokwi.simPause(); } catch { }
+    // AVR boards (Uno/Mega/Nano/ATtiny) need pre-compiled firmware - the embed
+    // doesn't compile them in-browser. Detect + build via hexi.wokwi.com,
+    // then persist sketch.hex + the corrected start params back onto the
+    // project so subsequent "start" clicks reuse them.
+    const diagram = project.files['diagram.json'];
+    const avrBoard = diagram ? detectAvrBoard(diagram) : null;
+    if (avrBoard && project.files['sketch.ino'] && !project.files['sketch.hex']) {
+        try {
+            setSimStatus(`compiling (${avrBoard})…`, 'warn');
+            const out = await buildArduinoHex(project.files['sketch.ino'], avrBoard);
+            project.files['sketch.hex'] = out.hex;
+            project.start = { firmware: 'sketch.hex', elf: 'sketch.hex' };
+            updateFilesBtnLabel();
+            if (out.stderr) console.warn('avr build warnings:', out.stderr);
+        } catch (e) {
+            setSimStatus('compile failed', 'err');
+            addError(`Compile error (${avrBoard}): ${e.message}`);
+            return;
+        }
+    } else if (avrBoard && project.files['sketch.hex']) {
+        // Already compiled (e.g. user clicked "start" again) - make sure the
+        // start params still point at the hex, not the original .ino.
+        project.start = { firmware: 'sketch.hex', elf: 'sketch.hex' };
+    }
+    const start = project.start || guessStart(project.files);
 
+    setSimStatus('uploading…', 'warn');
+    try { await wokwi.simPause(); } catch { }
     for (const [name, content] of Object.entries(project.files)) {
         const str = typeof content === 'string' ? content : JSON.stringify(content);
         await wokwi.fileUpload(name, str);
     }
-    const start = project.start || guessStart(project.files);
     setSimStatus('starting…', 'warn');
     try {
         await wokwi.simStart(start);
