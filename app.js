@@ -14,6 +14,9 @@ const sessionInput = $('#session-input');
 const sessionList = $('#session-list');
 const sessionNewBtn = $('#session-new');
 const sessionDeleteBtn = $('#session-delete');
+const verPrevBtn = $('#ver-prev');
+const verNextBtn = $('#ver-next');
+const verLabel = $('#ver-label');
 const llmStatusEl = $('#llm-status');
 const simStatusEl = $('#sim-status');
 const serialOutEl = $('#serial-out');
@@ -68,6 +71,8 @@ let currentProject = null;
 let sessions = [];   // newest first
 let activeId = null;
 
+const MAX_VERSIONS = 5;
+
 function newSessionObj() {
     return {
         id: 's_' + Math.random().toString(36).slice(2, 10),
@@ -76,6 +81,8 @@ function newSessionObj() {
         updatedAt: Date.now(),
         conversation: [],
         currentProject: null,
+        versions: [],      // array of { ts, conversation, currentProject } snapshots, oldest..newest
+        versionIndex: -1,  // pointer into versions[]; -1 = no snapshots yet
     };
 }
 
@@ -113,7 +120,11 @@ function loadSessions() {
         if (raw) {
             const obj = JSON.parse(raw);
             if (obj && Array.isArray(obj.sessions) && obj.sessions.length) {
-                sessions = obj.sessions;
+                sessions = obj.sessions.map(s => ({
+                    versions: [],
+                    versionIndex: -1,
+                    ...s,
+                }));
                 activeId = obj.activeId && sessions.find(s => s.id === obj.activeId)
                     ? obj.activeId : sessions[0].id;
                 return;
@@ -141,6 +152,91 @@ function loadSessions() {
     activeId = s.id;
 }
 
+// Per-session version history. Snapshots are taken after each LLM-produced
+// project. We keep at most MAX_VERSIONS; older ones drop off the front.
+// versionIndex points at whichever snapshot is currently loaded so prev/next
+// can walk in either direction.
+function cloneState() {
+    return {
+        ts: Date.now(),
+        conversation: JSON.parse(JSON.stringify(conversation)),
+        currentProject: currentProject ? sanitizeProjectForSnapshot(currentProject) : null,
+    };
+}
+
+function sanitizeProjectForSnapshot(p) {
+    // Drop compiled hex from snapshots — it's recomputable and otherwise
+    // multiplies localStorage usage by 5.
+    const copy = JSON.parse(JSON.stringify(p));
+    if (copy.files && copy.files['sketch.hex']) delete copy.files['sketch.hex'];
+    return copy;
+}
+
+function snapshotVersion() {
+    const s = activeSession();
+    if (!s) return;
+    if (!s.versions) s.versions = [];
+    // If user navigated back and now creates a new version, drop forward
+    // history (classic undo/redo semantics).
+    if (typeof s.versionIndex === 'number' && s.versionIndex >= 0 && s.versionIndex < s.versions.length - 1) {
+        s.versions = s.versions.slice(0, s.versionIndex + 1);
+    }
+    s.versions.push(cloneState());
+    if (s.versions.length > MAX_VERSIONS) s.versions = s.versions.slice(-MAX_VERSIONS);
+    s.versionIndex = s.versions.length - 1;
+}
+
+function gotoVersion(idx) {
+    const s = activeSession();
+    if (!s || !s.versions?.length) return;
+    idx = Math.max(0, Math.min(s.versions.length - 1, idx));
+    if (idx === s.versionIndex) return;
+    s.versionIndex = idx;
+    const v = s.versions[idx];
+    conversation = JSON.parse(JSON.stringify(v.conversation));
+    currentProject = v.currentProject ? JSON.parse(JSON.stringify(v.currentProject)) : null;
+    s.conversation = conversation;
+    s.currentProject = currentProject;
+    persistSessions();
+    rebuildChatUI();
+    renderVersionUI();
+    if (currentProject && wokwiReady) runProject(currentProject);
+}
+
+function renderVersionUI() {
+    const s = activeSession();
+    const versions = s?.versions || [];
+    const total = versions.length;
+    const idx = (typeof s?.versionIndex === 'number' ? s.versionIndex : -1);
+    if (total === 0) {
+        verLabel.textContent = 'v0/0';
+        verPrevBtn.disabled = true;
+        verNextBtn.disabled = true;
+    } else {
+        verLabel.textContent = `v${idx + 1}/${total}`;
+        verPrevBtn.disabled = idx <= 0;
+        verNextBtn.disabled = idx >= total - 1;
+    }
+}
+
+// Rebuild the chat DOM from the current `conversation` mirror.
+function rebuildChatUI() {
+    activeFilePath = null;
+    messagesEl.querySelectorAll('.msg:not(.msg-system)').forEach(n => n.remove());
+    for (const m of conversation) {
+        if (m.role === 'user') {
+            addMessage('user', m.content);
+        } else if (m.role === 'assistant') {
+            const clean = String(m.content).replace(/```wokwi-project[\s\S]*?```/i, '').trim();
+            const el = addMessage('assistant', clean || 'Project generated.');
+            const proj = extractProject(m.content);
+            if (proj) addProjectSummary(el, proj);
+        }
+    }
+    updateFilesBtnLabel();
+    [btnStart, btnPause, btnStop, btnRestart, btnFiles].forEach(b => b.disabled = !currentProject);
+}
+
 function saveSession() {
     const s = activeSession();
     if (s) {
@@ -155,6 +251,7 @@ function saveSession() {
     }
     persistSessions();
     renderSessionPicker();
+    renderVersionUI();
 }
 
 // Searchable combobox state. The input doubles as filter + display: when the
@@ -675,6 +772,17 @@ sessionDeleteBtn.addEventListener('click', () => {
     loadActive();
 });
 
+verPrevBtn.addEventListener('click', () => {
+    const s = activeSession();
+    if (!s?.versions?.length) return;
+    gotoVersion((s.versionIndex ?? 0) - 1);
+});
+verNextBtn.addEventListener('click', () => {
+    const s = activeSession();
+    if (!s?.versions?.length) return;
+    gotoVersion((s.versionIndex ?? 0) + 1);
+});
+
 function switchSession(id) {
     if (!sessions.find(s => s.id === id)) return;
     activeId = id;
@@ -687,22 +795,9 @@ function loadActive() {
     const s = activeSession();
     conversation = s ? [...s.conversation] : [];
     currentProject = s ? s.currentProject : null;
-    activeFilePath = null;
-
-    messagesEl.querySelectorAll('.msg:not(.msg-system)').forEach(n => n.remove());
-    for (const m of conversation) {
-        if (m.role === 'user') {
-            addMessage('user', m.content);
-        } else if (m.role === 'assistant') {
-            const clean = String(m.content).replace(/```wokwi-project[\s\S]*?```/i, '').trim();
-            const el = addMessage('assistant', clean || 'Project generated.');
-            const proj = extractProject(m.content);
-            if (proj) addProjectSummary(el, proj);
-        }
-    }
-    updateFilesBtnLabel();
-    [btnStart, btnPause, btnStop, btnRestart, btnFiles].forEach(b => b.disabled = !currentProject);
+    rebuildChatUI();
     renderSessionPicker();
+    renderVersionUI();
     if (currentProject && wokwiReady) runProject(currentProject);
 }
 
@@ -752,6 +847,7 @@ async function send() {
         currentProject = project;
         updateFilesBtnLabel();
         addProjectSummary(asstEl, project);
+        snapshotVersion();
         saveSession();
         await runProject(project);
         saveSession(); // pick up sketch.hex / start changes from AVR compile

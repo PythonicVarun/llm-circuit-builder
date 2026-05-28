@@ -37,7 +37,7 @@
     <main class="layout">
         <!-- LEFT: chat -->
         <section class="panel chat-panel">
-            <div class="panel-header">
+            <div class="panel-header" style="gap: 0.25rem; flex-direction: column;">
                 <h2>Describe a circuit</h2>
                 <div class="session-bar">
                     <div class="session-combo">
@@ -46,6 +46,10 @@
                     </div>
                     <button id="session-new" class="ghost-btn small" title="New session">+</button>
                     <button id="session-delete" class="ghost-btn small" title="Delete this session">&times;</button>
+                    <span class="ver-divider"></span>
+                    <button id="ver-prev" class="ghost-btn small" title="Previous version" disabled>&lsaquo;</button>
+                    <span id="ver-label" class="ver-label" title="Version (up to 5 kept)">v0/0</span>
+                    <button id="ver-next" class="ghost-btn small" title="Next version" disabled>&rsaquo;</button>
                 </div>
             </div>
 

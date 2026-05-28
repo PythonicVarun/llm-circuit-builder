@@ -903,3 +903,20 @@ body {
     font-size: 12px;
     font-style: italic;
 }
+
+.ver-divider {
+    width: 1px;
+    align-self: stretch;
+    background: var(--line);
+    margin: 0 2px;
+}
+.ver-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-mute);
+    min-width: 38px;
+    text-align: center;
+}
+.ver-label.dirty {
+    color: var(--amber);
+}
