@@ -1,6 +1,7 @@
 import { MessagePortTransport } from './message-port-transport.js';
 import { WokwiClient } from './wokwi-client.js';
 import { LLMClient, extractProject } from './llm.js';
+import { buildZip, buildTree, downloadBlob } from './zip.js';
 
 // DOM elements
 const $ = (s) => document.querySelector(s);
@@ -29,10 +30,16 @@ const cfgSave = $('#cfg-save');
 const cfgClear = $('#cfg-clear');
 
 // files modal
-const filesModal = $('#files-modal');
-const filesClose = $('#files-close');
-const filesList = $('#files-list');
-const filesView = $('#files-view');
+const filesModal       = $('#files-modal');
+const filesClose       = $('#files-close');
+const filesTreeEl      = $('#files-tree');
+const filesView        = $('#files-view');
+const filesCountEl     = $('#files-count');
+const filesActivePath  = $('#files-active-path');
+const filesDownloadBtn = $('#files-download');
+const filesDownloadOne = $('#files-download-one');
+
+let activeFilePath = null;
 
 // state
 const STORAGE_KEY = 'circuit-lab.llm-config';
@@ -130,7 +137,7 @@ document.querySelectorAll('.preset').forEach((b) => {
     });
 });
 
-// files modal
+// files explorer modal
 btnFiles.addEventListener('click', () => {
     if (!currentProject) return;
     renderFiles();
@@ -139,24 +146,102 @@ btnFiles.addEventListener('click', () => {
 filesClose.addEventListener('click', () => filesModal.classList.add('hidden'));
 filesModal.addEventListener('click', (e) => { if (e.target === filesModal) filesModal.classList.add('hidden'); });
 
-function renderFiles() {
-    filesList.innerHTML = '';
-    const names = Object.keys(currentProject.files);
-    names.forEach((name, i) => {
-        const li = document.createElement('li');
-        li.textContent = name;
-        if (i === 0) { li.classList.add('active'); showFile(name); }
-        li.addEventListener('click', () => {
-            filesList.querySelectorAll('li').forEach(x => x.classList.remove('active'));
-            li.classList.add('active');
-            showFile(name);
-        });
-        filesList.appendChild(li);
-    });
+filesDownloadBtn.addEventListener('click', () => {
+    if (!currentProject) return;
+    const flat = Object.fromEntries(
+        Object.entries(currentProject.files).map(([k, v]) => [
+            k, typeof v === 'string' ? v : JSON.stringify(v, null, 2)
+        ])
+    );
+    const zip = buildZip(flat);
+    downloadBlob(zip, projectZipName());
+});
+
+filesDownloadOne.addEventListener('click', () => {
+    if (!activeFilePath || !currentProject) return;
+    const v = currentProject.files[activeFilePath];
+    const text = typeof v === 'string' ? v : JSON.stringify(v, null, 2);
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    downloadBlob(blob, activeFilePath.split('/').pop());
+});
+
+function projectZipName() {
+    const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
+    return `circuit-lab-${stamp}.zip`;
 }
-function showFile(name) {
-    const content = currentProject.files[name];
+
+const ICON_FOLDER = `<svg class="icon" viewBox="0 0 16 16"><path d="M1.5 3.5h4l1.5 1.5h7v8.5h-12.5z" fill="currentColor" opacity=".25"/><path d="M1.5 3.5h4l1.5 1.5h7v8.5h-12.5z" stroke="currentColor" stroke-width="1.1" fill="none" stroke-linejoin="round"/></svg>`;
+const ICON_FILE   = `<svg class="icon" viewBox="0 0 16 16"><path d="M3 2h7l3 3v9H3z" stroke="currentColor" stroke-width="1.1" fill="none" stroke-linejoin="round"/><path d="M10 2v3h3" stroke="currentColor" stroke-width="1.1" fill="none"/></svg>`;
+
+function renderFiles() {
+    activeFilePath = null;
+    filesActivePath.textContent = 'No file selected';
+    filesView.textContent = 'Select a file from the tree';
+    filesDownloadOne.disabled = true;
+
+    const names = Object.keys(currentProject.files);
+    filesCountEl.textContent = `· ${names.length} file${names.length === 1 ? '' : 's'}`;
+
+    filesTreeEl.innerHTML = '';
+    const tree = buildTree(names);
+    filesTreeEl.appendChild(renderTreeNode(tree, ''));
+
+    // auto-select first file
+    const first = filesTreeEl.querySelector('.tree-row.file');
+    if (first) first.click();
+}
+
+function renderTreeNode(node, prefix) {
+    const wrap = document.createElement('div');
+    wrap.className = 'tree-node';
+
+    // sorted folders first, then files
+    const folderNames = Object.keys(node.folders).sort();
+    const fileNames   = Object.keys(node.files).sort();
+
+    for (const name of folderNames) {
+        const row = document.createElement('div');
+        row.className = 'tree-row folder';
+        row.innerHTML = `<span class="caret">▾</span>${ICON_FOLDER}<span class="name">${escapeHtml(name)}</span>`;
+        const children = document.createElement('div');
+        children.className = 'tree-children';
+        children.appendChild(renderTreeNode(node.folders[name], prefix + name + '/'));
+        row.addEventListener('click', () => {
+            row.classList.toggle('collapsed');
+            children.classList.toggle('hidden');
+        });
+        wrap.appendChild(row);
+        wrap.appendChild(children);
+    }
+
+    for (const name of fileNames) {
+        const fullPath = node.files[name];
+        const row = document.createElement('div');
+        row.className = 'tree-row file';
+        row.innerHTML = `<span class="caret" style="visibility:hidden">·</span>${ICON_FILE}<span class="name">${escapeHtml(name)}</span>`;
+        row.addEventListener('click', () => selectFile(fullPath, row));
+        wrap.appendChild(row);
+    }
+    return wrap;
+}
+
+function selectFile(path, rowEl) {
+    activeFilePath = path;
+    filesTreeEl.querySelectorAll('.tree-row.active').forEach(n => n.classList.remove('active'));
+    rowEl.classList.add('active');
+    const content = currentProject.files[path];
     filesView.textContent = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
+    filesActivePath.textContent = path;
+    filesDownloadOne.disabled = false;
+}
+
+function updateFilesBtnLabel() {
+    if (!currentProject) {
+        btnFiles.textContent = 'files…';
+        return;
+    }
+    const n = Object.keys(currentProject.files).length;
+    btnFiles.textContent = `files (${n})`;
 }
 
 // Chat UI
@@ -187,7 +272,25 @@ function addProjectSummary(el, project) {
     <div><b>${escapeHtml(project.explanation || 'Project generated.')}</b></div>
     <div style="margin-top:6px">files: ${fileChips}</div>
     <div style="margin-top:4px">firmware: <code>${escapeHtml(project.start?.firmware || '?')}</code></div>
+    <div class="proj-actions">
+      <button class="link-btn" data-act="browse">browse files &rsaquo;</button>
+      <button class="link-btn" data-act="zip">download .zip &darr;</button>
+    </div>
   `;
+    div.querySelector('[data-act=browse]').addEventListener('click', () => {
+        if (!currentProject) return;
+        renderFiles();
+        filesModal.classList.remove('hidden');
+    });
+    div.querySelector('[data-act=zip]').addEventListener('click', () => {
+        if (!currentProject) return;
+        const flat = Object.fromEntries(
+            Object.entries(currentProject.files).map(([k, v]) => [
+                k, typeof v === 'string' ? v : JSON.stringify(v, null, 2)
+            ])
+        );
+        downloadBlob(buildZip(flat), projectZipName());
+    });
     el.appendChild(div);
 }
 
@@ -345,6 +448,7 @@ async function send() {
         addError('LLM did not return a valid wokwi-project block. Ask it to retry or refine the prompt.');
     } else {
         currentProject = project;
+        updateFilesBtnLabel();
         addProjectSummary(asstEl, project);
         await runProject(project);
     }
@@ -352,6 +456,16 @@ async function send() {
     isStreaming = false;
     sendBtn.disabled = !llm;
 }
+
+// Debug hook: load a project without going through the LLM (used by manual
+// testing and by anyone who wants to drop a hand-written project into Wokwi).
+window.loadProject = async (project) => {
+    currentProject = project;
+    updateFilesBtnLabel();
+    renderFiles();
+    filesModal.classList.remove('hidden');
+    if (wokwiReady) await runProject(project);
+};
 
 // Boot
 updateLLMStatus();

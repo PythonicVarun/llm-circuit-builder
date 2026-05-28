@@ -33,6 +33,7 @@ Or with any static server (`npx serve .`, `caddy file-server`, etc.) 💻.
    ```
 4. Each file is uploaded via `file:upload` 📤, then `sim:start` 🎬 kicks off the simulation.
 5. Serial output is streamed back into the on-page monitor 📺.
+6. Every generated file is kept in an on-page **file explorer** 🗂️ with nested-folder support (so the LLM is free to organise output into `src/`, `lib/`, etc.). One click downloads the whole project as a `.zip` 📦, or you can save any single file.
 
 ## 🛠️ Configure the LLM
 
@@ -52,6 +53,7 @@ Presets are included for OpenAI, OpenRouter, Groq, and Ollama 🎛️. Values ar
 - 🎨 `styles.css` - phosphor-on-slate UI
 - 🧠 `app.js`     - orchestrator (LLM ↔ Wokwi ↔ DOM)
 - 🤖 `llm.js`     - OpenAI-compatible streaming client + system prompt
+- 🗜️ `zip.js`     - zero-dep STORE-method ZIP builder + path-to-tree grouping
 - 🔌 `wokwi-client.js`, `message-port-transport.js`, `base64.js` - Wokwi embed protocol (MIT, CodeMagic LTD)
 
 ## 🙏 Credits
