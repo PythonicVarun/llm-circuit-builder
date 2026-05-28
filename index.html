@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Circuit Lab · LLM-driven Wokwi simulations</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="icon"
+        href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230a0e14'/%3E%3Cpath d='M4 16h6l2-6 4 12 2-6h10' stroke='%2334d399' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+</head>
+
+<body>
+    <header class="topbar">
+        <div class="brand">
+            <svg viewBox="0 0 32 32" width="22" height="22" aria-hidden="true">
+                <path d="M2 16h6l2-7 4 14 2-7h14" stroke="currentColor" stroke-width="2.2" fill="none"
+                    stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <span class="brand-name">Circuit&nbsp;Lab</span>
+            <span class="brand-tag">/ llm &times; wokwi</span>
+        </div>
+        <div class="topbar-actions">
+            <span id="llm-status" class="pill pill-warn" title="LLM not configured">LLM: not configured</span>
+            <span id="sim-status" class="pill" title="Simulator status">sim: idle</span>
+            <button id="settings-btn" class="ghost-btn" title="Configure LLM">
+                <svg viewBox="0 0 24 24" width="16" height="16">
+                    <path
+                        d="M12 8a4 4 0 100 8 4 4 0 000-8zm9.4 4l2-1.6-2-3.4-2.4.8a8 8 0 00-2-1.2L16.4 4h-4l-.6 2.6a8 8 0 00-2 1.2L7.4 7l-2 3.4 2 1.6a8 8 0 000 2.4l-2 1.6 2 3.4 2.4-.8a8 8 0 002 1.2l.6 2.6h4l.6-2.6a8 8 0 002-1.2l2.4.8 2-3.4-2-1.6a8 8 0 000-2.4z"
+                        stroke="currentColor" stroke-width="1.4" fill="none" />
+                </svg>
+                Settings
+            </button>
+        </div>
+    </header>
+
+    <main class="layout">
+        <!-- LEFT: chat -->
+        <section class="panel chat-panel">
+            <div class="panel-header">
+                <h2>Describe a circuit</h2>
+                <button id="new-chat" class="ghost-btn small" title="Reset conversation">clear</button>
+            </div>
+
+            <div id="messages" class="messages">
+                <div class="msg msg-system">
+                    <p>Tell me what you want to build. The LLM writes <code>diagram.json</code> + firmware, then we run
+                        it in Wokwi on the right.</p>
+                    <div class="examples">
+                        <button class="example">Blink an LED on Arduino UNO pin 13</button>
+                        <button class="example">ESP32 MicroPython — print uptime over serial</button>
+                        <button class="example">Pi Pico + HC-SR04, log distance every 500&nbsp;ms</button>
+                        <button class="example">Arduino UNO + potentiometer reading on A0 to serial</button>
+                        <button class="example">Knight Rider — 6 LEDs sweeping on UNO pins 2&ndash;7</button>
+                    </div>
+                </div>
+            </div>
+
+            <form id="composer" class="composer">
+                <textarea id="prompt" rows="3"
+                    placeholder="Describe your circuit, or ask the LLM to change the current one&hellip;"></textarea>
+                <div class="composer-row">
+                    <span class="hint">⌘/Ctrl&nbsp;+&nbsp;Enter to send</span>
+                    <button id="send-btn" type="submit">Generate&nbsp;&rsaquo;</button>
+                </div>
+            </form>
+        </section>
+
+        <!-- RIGHT: simulator -->
+        <section class="panel sim-panel">
+            <div class="panel-header">
+                <h2>Simulator</h2>
+                <div class="sim-actions">
+                    <button id="btn-start" class="ghost-btn small" disabled>start</button>
+                    <button id="btn-pause" class="ghost-btn small" disabled>pause</button>
+                    <button id="btn-restart" class="ghost-btn small" disabled>restart</button>
+                    <button id="btn-files" class="ghost-btn small" disabled>files&hellip;</button>
+                </div>
+            </div>
+
+            <div class="iframe-wrap">
+                <iframe id="wokwi-embed" src="https://wokwi.com/experimental/embed" allow="serial; usb"
+                    title="Wokwi simulator"></iframe>
+            </div>
+
+            <div class="serial">
+                <div class="serial-header">
+                    <span class="dot"></span>
+                    <span>serial monitor</span>
+                    <button id="serial-clear" class="ghost-btn small">clear</button>
+                </div>
+                <pre id="serial-out" class="serial-out" tabindex="0"></pre>
+            </div>
+        </section>
+    </main>
+
+    <!-- LLM SETTINGS MODAL -->
+    <div id="settings-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <div class="modal-card">
+            <div class="modal-head">
+                <h3 id="settings-title">LLM configuration</h3>
+                <button class="ghost-btn small" id="settings-close">close</button>
+            </div>
+            <p class="modal-sub">Any OpenAI-compatible Chat Completions endpoint. Keys live in your browser only
+                (localStorage).</p>
+
+            <label>
+                <span>API base URL</span>
+                <input id="cfg-base" type="text" placeholder="https://api.openai.com/v1" autocomplete="off" />
+            </label>
+            <label>
+                <span>API key</span>
+                <input id="cfg-key" type="password" placeholder="sk-&hellip;" autocomplete="off" />
+            </label>
+            <label>
+                <span>Model ID</span>
+                <input id="cfg-model" type="text" placeholder="gpt-4o-mini" autocomplete="off" />
+            </label>
+
+            <details class="presets">
+                <summary>presets</summary>
+                <div class="preset-grid">
+                    <button class="preset" data-base="https://api.openai.com/v1" data-model="gpt-4o-mini">OpenAI ·
+                        gpt-4o-mini</button>
+                    <button class="preset" data-base="https://api.openai.com/v1" data-model="gpt-4o">OpenAI ·
+                        gpt-4o</button>
+                    <button class="preset" data-base="https://openrouter.ai/api/v1"
+                        data-model="anthropic/claude-3.5-sonnet">OpenRouter · claude-3.5-sonnet</button>
+                    <button class="preset" data-base="https://openrouter.ai/api/v1"
+                        data-model="google/gemini-2.0-flash-exp:free">OpenRouter · gemini-2.0-flash</button>
+                    <button class="preset" data-base="https://api.groq.com/openai/v1"
+                        data-model="llama-3.3-70b-versatile">Groq · llama-3.3-70b</button>
+                    <button class="preset" data-base="http://localhost:11434/v1" data-model="qwen2.5-coder:7b">Ollama ·
+                        qwen2.5-coder</button>
+                </div>
+            </details>
+
+            <div class="modal-foot">
+                <button id="cfg-clear" class="ghost-btn small">forget</button>
+                <button id="cfg-save" class="primary-btn">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- FILES DRAWER -->
+    <div id="files-modal" class="modal hidden" role="dialog" aria-modal="true">
+        <div class="modal-card wide">
+            <div class="modal-head">
+                <h3>Project files</h3>
+                <button class="ghost-btn small" id="files-close">close</button>
+            </div>
+            <div class="files-layout">
+                <ul id="files-list" class="files-list"></ul>
+                <pre id="files-view" class="files-view"><code>Select a file</code></pre>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="app.js"></script>
+</body>
+
+</html>
