@@ -17,6 +17,7 @@ const serialOutEl = $('#serial-out');
 const serialClear = $('#serial-clear');
 const btnStart = $('#btn-start');
 const btnPause = $('#btn-pause');
+const btnStop = $('#btn-stop');
 const btnRestart = $('#btn-restart');
 const btnFiles = $('#btn-files');
 
@@ -375,7 +376,7 @@ async function runProject(project) {
     try {
         await wokwi.simStart(start);
         setSimStatus('running', 'ok');
-        [btnStart, btnPause, btnRestart, btnFiles].forEach(b => b.disabled = false);
+        [btnStart, btnPause, btnStop, btnRestart, btnFiles].forEach(b => b.disabled = false);
     } catch (e) {
         setSimStatus('start failed', 'err');
         addError(`Simulator: ${e.message}`);
@@ -399,6 +400,10 @@ btnPause.addEventListener('click', async () => {
         if (s.running) { await wokwi.simPause(); setSimStatus('paused', 'warn'); }
         else { await wokwi.simResume(); setSimStatus('running', 'ok'); }
     } catch (e) { addError(e.message); }
+});
+btnStop.addEventListener('click', async () => {
+    try { await wokwi.simRestart({ pause: true }); setSimStatus('stopped', 'warn'); serialOutEl.textContent = ''; }
+    catch (e) { addError(e.message); }
 });
 btnRestart.addEventListener('click', async () => {
     try { await wokwi.simRestart({ pause: false }); setSimStatus('running', 'ok'); serialOutEl.textContent = ''; }
