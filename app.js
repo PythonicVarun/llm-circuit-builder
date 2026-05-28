@@ -867,6 +867,89 @@ window.loadProject = async (project) => {
     if (wokwiReady) await runProject(project);
 };
 
+// Drag-to-resize splitters: horizontal between chat/sim columns, vertical
+// between the simulator iframe and the serial monitor. Sizes are persisted in
+// localStorage and restored on boot.
+const LAYOUT_KEY = 'circuit-lab.layout';
+const layoutState = (() => {
+    try { return JSON.parse(localStorage.getItem(LAYOUT_KEY)) || {}; } catch { return {}; }
+})();
+
+function applyLayout() {
+    if (layoutState.colChat) document.documentElement.style.setProperty('--col-chat', `${layoutState.colChat}px`);
+    if (layoutState.serialH) document.documentElement.style.setProperty('--serial-h', `${layoutState.serialH}px`);
+}
+function saveLayout() { try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(layoutState)); } catch { } }
+applyLayout();
+
+function bindSplitter(handleEl, opts) {
+    handleEl.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        handleEl.setPointerCapture(e.pointerId);
+        handleEl.classList.add('dragging');
+        document.body.classList.add('is-resizing');
+        const startPos = opts.axis === 'x' ? e.clientX : e.clientY;
+        const startSize = opts.getStart();
+
+        const move = (ev) => {
+            const now = opts.axis === 'x' ? ev.clientX : ev.clientY;
+            const delta = (now - startPos) * (opts.invert ? -1 : 1);
+            const next = Math.max(opts.min, Math.min(opts.max(), startSize + delta));
+            opts.set(next);
+        };
+        const up = (ev) => {
+            handleEl.releasePointerCapture(ev.pointerId);
+            handleEl.classList.remove('dragging');
+            document.body.classList.remove('is-resizing');
+            handleEl.removeEventListener('pointermove', move);
+            handleEl.removeEventListener('pointerup', up);
+            saveLayout();
+        };
+        handleEl.addEventListener('pointermove', move);
+        handleEl.addEventListener('pointerup', up);
+        handleEl.addEventListener('pointercancel', up);
+    });
+    // Double-click resets to default.
+    handleEl.addEventListener('dblclick', () => {
+        opts.reset();
+        saveLayout();
+    });
+}
+
+bindSplitter($('#split-cols'), {
+    axis: 'x',
+    min: 280,
+    max: () => Math.max(320, window.innerWidth - 360),
+    getStart: () => $('.chat-panel').getBoundingClientRect().width,
+    set: (v) => {
+        layoutState.colChat = Math.round(v);
+        document.documentElement.style.setProperty('--col-chat', `${layoutState.colChat}px`);
+    },
+    reset: () => {
+        delete layoutState.colChat;
+        document.documentElement.style.removeProperty('--col-chat');
+    },
+});
+
+bindSplitter($('#split-rows'), {
+    axis: 'y',
+    invert: true, // dragging up grows the serial pane
+    min: 80,
+    max: () => {
+        const panel = $('.sim-panel').getBoundingClientRect().height;
+        return Math.max(120, panel - 160);
+    },
+    getStart: () => $('.serial').getBoundingClientRect().height,
+    set: (v) => {
+        layoutState.serialH = Math.round(v);
+        document.documentElement.style.setProperty('--serial-h', `${layoutState.serialH}px`);
+    },
+    reset: () => {
+        delete layoutState.serialH;
+        document.documentElement.style.removeProperty('--serial-h');
+    },
+});
+
 // Boot
 updateLLMStatus();
 setSimStatus('idle');
